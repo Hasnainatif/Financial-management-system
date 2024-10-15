@@ -1,78 +1,49 @@
 import streamlit as st
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from passlib.hash import pbkdf2_sha256
 import pandas as pd
-import matplotlib.pyplot as plt
 import datetime
+import matplotlib.pyplot as plt
 
-# Setup Database
-Base = declarative_base()
-engine = create_engine('sqlite:///finance.db')
-Session = sessionmaker(bind=engine)
-session = Session()
+# Initialize session state
+if 'transactions' not in st.session_state:
+    st.session_state['transactions'] = []
+if 'user_balance' not in st.session_state:
+    st.session_state['user_balance'] = 0.0
 
-# User Model
-class User(Base):
-    __tablename__ = 'users'
-    id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True, nullable=False)
-    password = Column(String, nullable=False)
-    balance = Column(Float, default=0.0)
-
-# Transaction Model
-class Transaction(Base):
-    __tablename__ = 'transactions'
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer)
-    date = Column(Date)
-    category = Column(String)
-    amount = Column(Float)
-    type = Column(String)  # income or expense
-    description = Column(String)
-
-Base.metadata.create_all(engine)
-
-# Authentication functions
-def create_user(username, password):
-    hashed_pw = pbkdf2_sha256.hash(password)
-    user = User(username=username, password=hashed_pw)
-    session.add(user)
-    session.commit()
-
+# User Authentication Functions
 def authenticate_user(username, password):
-    user = session.query(User).filter_by(username=username).first()
-    if user and pbkdf2_sha256.verify(password, user.password):
-        return user
-    return None
+    # This is a simplified example. In a real app, you would check a database.
+    return username == "user" and password == "password"
 
-# Budget and Expense Functions
-def add_transaction(user_id, category, amount, type, description):
-    transaction = Transaction(
-        user_id=user_id,
-        date=datetime.date.today(),
-        category=category,
-        amount=amount,
-        type=type,
-        description=description
-    )
-    session.add(transaction)
-    session.commit()
-
-def get_transactions(user_id):
-    return session.query(Transaction).filter_by(user_id=user_id).all()
+# Transaction Management Functions
+def add_transaction(category, amount, type, description):
+    transaction = {
+        'date': datetime.date.today(),
+        'category': category,
+        'amount': amount,
+        'type': type,
+        'description': description
+    }
+    st.session_state['transactions'].append(transaction)
+    # Update balance
+    if type == 'Income':
+        st.session_state['user_balance'] += amount
+    elif type == 'Expense':
+        st.session_state['user_balance'] -= amount
 
 # Visualization of Financial Goals
 def plot_transactions(transactions):
-    df = pd.DataFrame(transactions, columns=['date', 'category', 'amount'])
+    if not transactions:
+        return
+    df = pd.DataFrame(transactions)
     df['date'] = pd.to_datetime(df['date'])
-    
+
     plt.figure(figsize=(10, 5))
-    plt.plot(df['date'], df['amount'])
-    plt.title('Spending Over Time')
+    plt.plot(df['date'], df['amount'].where(df['type'] == 'Expense'), marker='o', label='Expenses', color='red')
+    plt.plot(df['date'], df['amount'].where(df['type'] == 'Income'), marker='o', label='Income', color='green')
+    plt.title('Income and Expenses Over Time')
     plt.xlabel('Date')
     plt.ylabel('Amount')
+    plt.legend()
     st.pyplot(plt)
 
 # Streamlit App
@@ -88,23 +59,16 @@ def main():
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         if st.button("Login"):
-            user = authenticate_user(username, password)
-            if user:
+            if authenticate_user(username, password):
                 st.session_state['logged_in'] = True
-                st.session_state['user'] = user
                 st.success("Logged in successfully!")
             else:
                 st.error("Invalid username or password")
-
-        st.subheader("Create an Account")
-        new_username = st.text_input("New Username")
-        new_password = st.text_input("New Password", type="password")
-        if st.button("Sign Up"):
-            create_user(new_username, new_password)
-            st.success("Account created successfully!")
     else:
-        user = st.session_state['user']
-        st.write(f"Welcome, {user.username}!")
+        st.write("Welcome to the Personal Finance Management System!")
+
+        # Display User Balance
+        st.write(f"Your current balance is: ${st.session_state['user_balance']:.2f}")
 
         # Expense Tracking
         st.subheader("Add Transaction")
@@ -113,17 +77,15 @@ def main():
         type = st.selectbox("Type", ["Income", "Expense"])
         description = st.text_input("Description")
         if st.button("Add Transaction"):
-            add_transaction(user.id, category, amount, type, description)
+            add_transaction(category, amount, type, description)
             st.success("Transaction added!")
 
         # View and Visualize Transactions
-        transactions = get_transactions(user.id)
         st.subheader("Your Transactions")
-        if transactions:
-            transaction_df = pd.DataFrame([(t.date, t.category, t.amount, t.type, t.description) for t in transactions],
-                                          columns=['Date', 'Category', 'Amount', 'Type', 'Description'])
+        if st.session_state['transactions']:
+            transaction_df = pd.DataFrame(st.session_state['transactions'])
             st.dataframe(transaction_df)
-            plot_transactions([(t.date, t.category, t.amount) for t in transactions])
+            plot_transactions(st.session_state['transactions'])
         else:
             st.write("No transactions yet.")
 
